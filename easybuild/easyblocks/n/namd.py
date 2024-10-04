@@ -93,7 +93,13 @@ class EB_NAMD(MakeCp):
 
         self.charm_dir = self.charm_tarballs[0][:-4]
 
-        charm_config = os.path.join(self.charm_dir, 'src', 'scripts', 'configure')
+        # NAMD-3.0 depends on charm-8.0.0 that uses Automake. The 'configure' file was
+        # removed in favour of 'configure.ac'
+        configure_file_name = 'configure'
+        if LooseVersion(self.version) >= LooseVersion('3.0'):
+            configure_file_name = 'configure.ac'
+
+        charm_config = os.path.join(self.charm_dir, 'src', 'scripts', configure_file_name)
         apply_regex_substitutions(charm_config, [(r'SHELL=/bin/csh', 'SHELL=$(which csh)')])
 
         for csh_script in [os.path.join('plugins', 'import_tree'), os.path.join('psfgen', 'import_tree'),
@@ -134,7 +140,21 @@ class EB_NAMD(MakeCp):
         self.namd_arch = '%s-%s' % (self.cfg['namd_basearch'], namd_comp)
         self.log.info("Completed NAMD target architecture: %s", self.namd_arch)
 
-        cmd = "./build charm++ %(arch)s %(opts)s --with-numa -j%(parallel)s '%(cxxflags)s'" % {
+        # NAMD-3.0 uses charm-8.0.0 that made a transition from configute + Make to Autotools + CMake build system.
+        # However, the CMake configs are not fully supported yet (as of 10.2024), see:
+        #  https://github.com/charmplusplus/charm/issues/2839
+        # One of the main problems is ignoring the "--with-hwloc-symbol-prefix" option passed
+        # to the hwloc build. This leads to undefined function names in charm-8.0.0/src/conv-core/cpuaffinity.C
+        # For instance: cmi_hwloc_topology_init(). The "cmi_" prefix is supposed to be set via the
+        # "--with-hwloc-symbol-prefix=cmi_" configure option for hwloc, however, this logic is not implemented
+        # in the corresponding "configure.ac" file. Thus, it's better and easier to use the "buildold script, 
+        # untill a full support for CMake is implemented.
+        build_cmd = './build'
+        if LooseVersion(self.version) >= LooseVersion('3.0'):
+            build_cmd = './buildold'
+
+        cmd = "%(build_cmd)s charm++ %(arch)s %(opts)s --with-numa -j%(parallel)s '%(cxxflags)s'" % {
+            'build_cmd': build_cmd,
             'arch': self.cfg['charm_arch'],
             'cxxflags': os.environ['CXXFLAGS'] + ' -DMPICH_IGNORE_CXX_SEEK ' + self.cfg['charm_extra_cxxflags'],
             'opts': self.cfg['charm_opts'],
